@@ -458,6 +458,7 @@ impl<O: Output> LsService<O> {
                 requests::CodeAction,
                 requests::DocumentHighlight,
                 requests::FindImpls,
+                requests::GenerateMatch,
                 requests::Symbols,
                 requests::Hover,
                 requests::WorkspaceSymbol,

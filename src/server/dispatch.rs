@@ -85,6 +85,7 @@ define_dispatch_request_enum!(
     Symbols,
     Hover,
     FindImpls,
+    GenerateMatch,
     DocumentHighlight,
     Rename,
     CodeAction,

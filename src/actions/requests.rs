@@ -46,7 +46,7 @@ pub use lsp_data::request::{
     RangeFormatting,
     ResolveCompletionItem as ResolveCompletion,
 };
-pub use lsp_data::FindImpls;
+pub use lsp_data::{FindImpls, GenerateMatch};
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -161,6 +161,98 @@ impl RequestAction for Hover {
         if !ty.is_empty() {
             contents.push(MarkedString::from_language_code("rust".into(), ty.into()));
         }
+        Ok(lsp_data::Hover {
+            contents: HoverContents::Array(contents),
+            range: None, // TODO: maybe add?
+        })
+    }
+}
+
+impl RequestAction for GenerateMatch {
+    type Response = lsp_data::Hover;
+
+    fn fallback_response() -> Result<Self::Response, ResponseError> {
+        Ok(lsp_data::Hover {
+            contents: HoverContents::Array(vec![]),
+            range: None,
+        })
+    }
+
+    fn handle(
+        ctx: InitActionContext,
+        params: Self::Params,
+    ) -> Result<Self::Response, ResponseError> {
+        let file_path = parse_file_path!(&params.text_document.uri, "generate-match")?;
+        eprintln!("file_path: {:?}\n", file_path);
+
+        let span = ctx.convert_pos_to_span(file_path, params.position);
+        eprintln!("span: {:?}\n", span);
+
+        trace!("generate-match: {:?}", span);
+
+        let analysis = ctx.analysis;
+        let mut contents = vec![];
+
+        if let Ok(id) = analysis.id(&span) {
+            let def = analysis.get_def(id).unwrap();
+
+            eprintln!("Id: {:?}\n", id);
+            eprintln!("Def: {:#?}\n\n", def);
+
+            if def.kind == ::analysis::DefKind::Local {
+                let ty = analysis.show_type(&span).unwrap_or_else(|_| String::new());
+                eprintln!("rls-analysis show_type: '{}'\n", ty);
+
+                // HACKY MC HACKFACE: String comparisons to get semantic type info
+                let is_reference = ty.starts_with("&");
+
+                // HACKY MC HACKFACE 2: the type the analysis returns can't apparently easily (I've tried)
+                // be connected back to its Def, so remove the crate/module parts of the qualname to make it work
+                // until I find out how it should actually be done
+                let ty = &ty[ty.rfind("::").unwrap()+2..];
+                eprintln!("Type name: '{}'\n", ty);
+
+                let id = analysis.search_for_id(ty).unwrap()[0];
+                let def = analysis.get_def(id).unwrap();
+
+                eprintln!("Type def: '{:#?}'\n", def);
+
+                if def.kind == ::analysis::DefKind::Enum {
+                    let mut variants = analysis.for_each_child_def(id, |_id, ref def| {
+                        eprintln!("Variant def: '{:#?}'\n", def);
+
+                        // MATCH ARM HACK: rustc save-analysis doesn't link to the data for an enum variants fields.
+                        // It shows some information in the variant's "value" though, and in the case of StructVariants
+                        // this value can be used as-is for a match arm.
+                        let mut variant = def.value.clone();
+
+                        // TUPLE HACK: However, TupleVariants only contain their fields' type names like 'Variant(String, u32)'
+                        // so a hack is to turn those into '_' until we can get the fields' Defs.
+                        // Note: not all TupleVariants have fields, and we'll only modify the ones that do
+                        if variant.contains("(") {
+                            let from = variant.find("(").unwrap();
+                            let to = variant.rfind(")").unwrap();
+                            let inner = variant[from..].to_string();
+                            let split = inner.split(",").map(|_| "_").collect::<Vec<_>>();
+                            variant = format!("{}{}{}", &variant[..from+1], split.join(", "), &variant[to..]); 
+                            eprintln!("split: '{}'\n", variant);
+                        }
+                        
+                        let prefix = if is_reference { "&" } else { "" };
+                        format!("{prefix}{variant} => unimplemented!(),", variant=variant, prefix=prefix)
+                    }).unwrap();
+
+                    variants.sort();
+
+                    eprintln!("Variants: {:?}\n", variants);
+
+                    for variant in variants {
+                        contents.push(MarkedString::from_language_code("rust".into(), variant));
+                    }
+                }
+            }
+        }
+        
         Ok(lsp_data::Hover {
             contents: HoverContents::Array(contents),
             range: None, // TODO: maybe add?

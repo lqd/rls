@@ -338,3 +338,12 @@ impl LSPRequest for FindImpls {
     type Result = Vec<Location>;
     const METHOD: &'static str = "rustDocument/implementations";
 }
+
+#[derive(Debug)]
+pub enum GenerateMatch { }
+
+impl LSPRequest for GenerateMatch {
+    type Params = TextDocumentPositionParams;
+    type Result = Hover;
+    const METHOD: &'static str = "rustDocument/match";
+}
